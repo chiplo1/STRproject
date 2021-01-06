@@ -12,7 +12,7 @@ EXECUTABLE := waveformGen
 all: $(EXECUTABLE)
 
 %: %.c
-	$(CC) -o $@ $< $(CFLAGS) $(LDFLAGS)
+	$(CC) -o $@ $< $(CFLAGS) $(LDFLAGS) -lm
 	
 clean:	
 	rm $(EXECUTABLE)

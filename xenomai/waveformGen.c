@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <signal.h>
+#include <math.h>
 
 #include <sys/mman.h> // For mlockall
 
@@ -33,15 +34,17 @@
 
 #define TASK_LOAD_NS      10*1000*1000 // Task execution time (in ns, same to all tasks)
 
+#define SAMPLE 40
+
 RT_TASK task_a_desc; // Task decriptor
 RT_TASK task_b_desc; // Task decriptor
 
 // Semaphore
 
-#define SEM_INIT 1       /* Initial semaphore count */
-#define SEM_MODE S_FIFO  /* Wait by FIFO order */
+//#define SEM_INIT 1       /* Initial semaphore count */
+//#define SEM_MODE S_FIFO  /* Wait by FIFO order */
 
-RT_SEM sem_desc;
+//RT_SEM sem_desc;
 
 /*
 * Catches CTRL + C to allow a controlled termination of the application
@@ -75,6 +78,7 @@ void simulate_load(RTIME load_ns) {
 float amplitude = 0; // 0 to 3.3 V resolution of 0.1 V
 unsigned long frequency = 1;   // 1 to 1k Hz resolution of 1 Hz
 char waveform = 's'; // s(sin) t(triangular) q(quadrada)
+char changed = 'y';
 
 /*
 * Task body implementation
@@ -112,13 +116,14 @@ void task_read_values(void *args) {
 		//simulate_load(TASK_LOAD_NS);
 
         // Read from shared memory or w/e
-        rt_sem_p(&sem_desc,TM_INFINITE);
+        //rt_sem_p(&sem_desc,TM_INFINITE);
 
         amplitude = amplitude+1;
         frequency = frequency+1;
-        waveform = 's';
+        waveform = 'q';
+        changed='y';
 
-        rt_sem_v(&sem_desc);
+        //rt_sem_v(&sem_desc);
 	}
 	return;
 }
@@ -131,6 +136,9 @@ void task_generate_waveform(void *args) {
 	RTIME to=0,ta=0;
 	unsigned long overruns;
 	int err;
+
+    
+    float wave[SAMPLE];
 	
 	/* Get task information */
 	curtask=rt_task_self();
@@ -156,11 +164,52 @@ void task_generate_waveform(void *args) {
 		//simulate_load(TASK_LOAD_NS);
 
         //Generate waveform
-        rt_sem_p(&sem_desc,TM_INFINITE);
+        //rt_sem_p(&sem_desc,TM_INFINITE);
 
-        printf("Amplitude %f, Frequency %lu, Waveform %c\n",amplitude,frequency,waveform);      
+        printf("Amplitude %f, Frequency %lu, Waveform %c\n",amplitude,frequency,waveform);
 
-        rt_sem_v(&sem_desc);  
+        if(changed=='y'){
+             switch(waveform){
+                case 's':
+                    for(int i = 0; i < SAMPLE ; i++){
+                        wave[i]= amplitude * sin(i*(2*M_PI/SAMPLE));
+                        //printf("Sin waveform: %f.\n",wave[i]);
+                    }
+                    break;
+                case 't':
+                    for(int i = 0; i < SAMPLE ; i++){
+                        int inst = SAMPLE/4;
+                        if(i<inst){
+                            wave[i]= i*amplitude/inst;
+                        }
+                        else if(i<3*inst){
+                            wave[i]= amplitude-(i-inst)*amplitude/inst;
+                        }
+                        else{
+                            wave[i]= (i-3*inst)*amplitude/inst - amplitude;
+                        }
+                        printf("Tri waveform: %f.\n",wave[i]);
+                    }
+                    break;
+                case 'q':
+                    for(int i = 0; i < SAMPLE ; i++){
+                        int inst = SAMPLE/2;
+                        if(i<inst){
+                            wave[i]= amplitude;
+                        }
+                        else{
+                            wave[i]= -amplitude;
+                        }
+                        printf("Qua waveform: %f.\n",wave[i]);
+                    }
+                    break;
+                default:
+                    printf("Bad waveform.\n");
+                    break;
+            }     
+        }
+
+        //rt_sem_v(&sem_desc);  
 
 	}
 	return;
@@ -194,7 +243,7 @@ int main(int argc, char *argv[]) {
 	} else 
 		printf("Task b created successfully\n");
 		
-    err = rt_sem_create(&sem_desc,"MySemaphore",SEM_INIT,SEM_MODE);
+    //err = rt_sem_create(&sem_desc,"MySemaphore",SEM_INIT,SEM_MODE);
 
 	/* Start RT task */
 	/* Args: task decriptor, address of function/implementation and argument*/
@@ -205,7 +254,8 @@ int main(int argc, char *argv[]) {
 
 	/* wait for termination signal */	
 	wait_for_ctrl_c();
-    rt_sem_delete(&sem_desc);
+    
+    //rt_sem_delete(&sem_desc);
 
 	return 0;
 		
