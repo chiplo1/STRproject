@@ -27,10 +27,10 @@
 #define TASK_STKSZ 0 	// Default stack size
 
 #define TASK_A_PRIO 20 	// RT priority [0..99]
-#define TASK_A_PERIOD_NS 200*1000*1000 // Task period (in ns)
+#define TASK_A_PERIOD_NS 1000*1000*1000 // Task period (in ns)
 
 #define TASK_B_PRIO 20 	// priority
-#define TASK_B_PERIOD_NS 100*1000*1000 // Task period (in ns)
+#define TASK_B_PERIOD_NS 500*1000*1000 // Task period (in ns)
 
 #define TASK_LOAD_NS      10*1000*1000 // Task execution time (in ns, same to all tasks)
 
@@ -75,7 +75,7 @@ void simulate_load(RTIME load_ns) {
 	return;
 }
 
-float amplitude = 0; // 0 to 3.3 V resolution of 0.1 V
+float amplitude = 1; // 0 to 3.3 V resolution of 0.1 V
 unsigned long frequency = 1;   // 1 to 1k Hz resolution of 1 Hz
 char waveform = 's'; // s(sin) t(triangular) q(quadrada)
 char changed = 'y';
@@ -120,7 +120,7 @@ void task_read_values(void *args) {
 
         amplitude = amplitude+1;
         frequency = frequency+1;
-        waveform = 'q';
+        waveform = 's';
         changed='y';
 
         //rt_sem_v(&sem_desc);
@@ -172,35 +172,30 @@ void task_generate_waveform(void *args) {
              switch(waveform){
                 case 's':
                     for(int i = 0; i < SAMPLE ; i++){
-                        wave[i]= amplitude * sin(i*(2*M_PI/SAMPLE));
-                        //printf("Sin waveform: %f.\n",wave[i]);
+                        wave[i]= amplitude/2 + amplitude/2 * sin(i*(2*M_PI/SAMPLE));
+                        printf("Sin waveform: %f.\n",wave[i]);
                     }
                     break;
                 case 't':
                     for(int i = 0; i < SAMPLE ; i++){
-                        int inst = SAMPLE/4;
-                        if(i<inst){
-                            wave[i]= i*amplitude/inst;
-                        }
-                        else if(i<3*inst){
-                            wave[i]= amplitude-(i-inst)*amplitude/inst;
+                        if(i<SAMPLE/2){
+                            wave[i]= i*amplitude/(SAMPLE/2);
                         }
                         else{
-                            wave[i]= (i-3*inst)*amplitude/inst - amplitude;
+                            wave[i]= amplitude-(i-SAMPLE/2)*amplitude/(SAMPLE/2);
                         }
                         printf("Tri waveform: %f.\n",wave[i]);
                     }
                     break;
                 case 'q':
                     for(int i = 0; i < SAMPLE ; i++){
-                        int inst = SAMPLE/2;
-                        if(i<inst){
+                        if(i<SAMPLE/2){
                             wave[i]= amplitude;
                         }
                         else{
-                            wave[i]= -amplitude;
+                            wave[i]= 0;
                         }
-                        printf("Qua waveform: %f.\n",wave[i]);
+                        printf("Qua waveform: %f\n",wave[i]);
                     }
                     break;
                 default:
