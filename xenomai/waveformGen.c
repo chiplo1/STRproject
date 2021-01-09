@@ -244,8 +244,9 @@ int main(int argc, char *argv[]) {
 	/* Args: task decriptor, address of function/implementation and argument*/
 	taskAArgs.taskPeriod_ns = TASK_A_PERIOD_NS; 
 	taskBArgs.taskPeriod_ns = TASK_B_PERIOD_NS; 
-    	rt_task_start(&task_a_desc, &task_read_values, (void *)&taskAArgs);
-    	rt_task_start(&task_b_desc, &task_generate_waveform, (void *)&taskBArgs);
+
+	rt_task_start(&task_a_desc, &task_read_values, (void *)&taskAArgs);
+	rt_task_start(&task_b_desc, &task_generate_waveform, (void *)&taskBArgs);
 
 	/* wait for termination signal */	
 	wait_for_ctrl_c();
