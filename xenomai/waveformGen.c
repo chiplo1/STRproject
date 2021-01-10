@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <math.h>
+#include <fcntl.h>
 
 #include <sys/mman.h> // For mlockall
 
@@ -23,6 +24,8 @@
 /*
  * Task attributes 
  */ 
+#define PIPE_MINOR 0
+
 #define TASK_MODE 0  	// No flags
 #define TASK_STKSZ 0 	// Default stack size
 
@@ -38,6 +41,7 @@
 
 RT_TASK task_a_desc; // Task decriptor
 RT_TASK task_b_desc; // Task decriptor
+
 
 // Semaphore
 
@@ -78,12 +82,16 @@ void simulate_load(RTIME load_ns) {
 float amplitude = 1; // 0 to 3.3 V resolution of 0.1 V
 unsigned long frequency = 1;   // 1 to 1k Hz resolution of 1 Hz
 char waveform = 's'; // s(sin) t(triangular) q(quadrada)
+
 char changed = 'y';
+
+int pipe_fd;
 
 /*
 * Task body implementation
 */
 void task_read_values(void *args) {
+
 	RT_TASK *curtask;
 	RT_TASK_INFO curtaskinfo;
 	struct taskArgsStruct *taskArgs;
@@ -115,14 +123,23 @@ void task_read_values(void *args) {
 		/* Task "load" */
 		//simulate_load(TASK_LOAD_NS);
 
-        // Read from shared memory or w/e
         //rt_sem_p(&sem_desc,TM_INFINITE);
-
+    
         amplitude = amplitude+1;
         frequency = frequency+1;
         waveform = 's';
         changed='y';
 
+        char devname[32], buf[16];
+        /* ... */
+        sprintf(devname, "/dev/rtp%d", PIPE_MINOR);
+        pipe_fd = open(devname, O_RDWR);
+
+        /* Wait for the prompt string "Hello"... */
+        read(pipe_fd, buf, sizeof(buf));
+
+        //printf(buf);
+        
         //rt_sem_v(&sem_desc);
 	}
 	return;
@@ -251,6 +268,9 @@ int main(int argc, char *argv[]) {
 	/* wait for termination signal */	
 	wait_for_ctrl_c();
     
+    rt_task_delete(&task_a_desc);
+    rt_task_delete(&task_b_desc);
+
     //rt_sem_delete(&sem_desc);
 
 	return 0;
