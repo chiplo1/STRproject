@@ -1,6 +1,13 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <string.h>
+#include <fcntl.h>
+
+#include <sys/types.h>
+
+#include <unistd.h>
+
+#define PIPE_MINOR 0
 
 typedef struct {
 	int freq;
@@ -11,8 +18,20 @@ typedef struct {
 } wave_data;
 
 void* send_to_xenomai(void* arg){
-    wave_data *wd = arg;
+    	wave_data *wd = arg;
 	printf(" Done!\n");
+	
+	int pipe;
+
+	char name[32];
+	char buf[16];
+
+	sprintf(name, "/dev/rtp%d", PIPE_MINOR);
+	pipe = open(name, O_RDWR);
+	if(pipe < 0) printf("Pipe creation failed!\n");
+
+	read(pipe, buf, sizeof(buf));
+	write(pipe, "Olá Guilherme", sizeof("Olá Guilherme"));
 }
 
 void* interface(void* arg){
