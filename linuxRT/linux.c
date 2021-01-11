@@ -13,6 +13,7 @@
 #define PIPE_MINOR 0
 
 struct {
+    long int mtype;
 	int freq;
 	float amp;
 	char form;
@@ -20,10 +21,16 @@ struct {
 	int transition;
 } wave_data;
 
-void* start_stop(void* arg){
-	printf("Start/Stop!");
+struct {
+    long int mtype;
+	int flag;
+} wave_flag;
 
-	int flag = 0;
+void* start_stop(void* arg){
+	//printf("Start/Stop!");
+
+	int flag = 1;
+
 	char input;
 
 	key_t key; 
@@ -36,26 +43,30 @@ void* start_stop(void* arg){
     // and returns identifier 
     msgid = msgget(key, 0666 | IPC_CREAT);
 
-	while(1){
+    printf("\n\nPress ENTER to start/stop the signal generation or insert y to create a new wave.\n");
 
-		if(flag){
-			printf("\nDo you want to stop it?");
-			scanf("%s", input);
-			flag = 0;
-			msgsnd(msgid, &flag, sizeof(flag), 0);
+    scanf("%c", &input);
 
-			printf("\nNew wave?(y/n)");
-			scanf("%s", input);
-			if(input == 'n') break;
-			msgsnd(msgid, "stop", sizeof("stop"), 0);
-		}
+	while(1){  
 
-		if(!flag){
-			printf("\nDo you want to start it?");
-			scanf("%s", input);
-			flag = 1;
-			msgsnd(msgid, &flag, sizeof(flag), 0);
-		}
+        if(flag==1){
+            printf("-> The wave started being generated.\n");
+        }
+        if(flag==0){
+            printf("-> The wave stopped being generated.\n");
+        }
+
+        scanf("%c", &input);
+
+        if(input=='y') break;
+        
+        flag=!(flag);
+
+        wave_flag.flag=flag;
+        wave_flag.mtype=2;
+
+        msgsnd(msgid, &wave_flag, sizeof(wave_flag), 0);
+        
 	}
 
 
@@ -83,10 +94,12 @@ void* send_to_xenomai(void* arg){
     // display the message 
     printf("Data sent.\n");
 
-	printf("Starting a Start/Stop switch...");
-	pthread_t tid;
-	pthread_create(&tid, NULL, &start_stop, NULL);
-	pthread_join(tid, NULL);
+    if(wave_data.trigger==0){
+	    printf("Starting a Start/Stop switch...");
+	    pthread_t tid;
+	    pthread_create(&tid, NULL, &start_stop, NULL);
+	    pthread_join(tid, NULL);
+    }
 
 
 }
@@ -94,6 +107,7 @@ void* send_to_xenomai(void* arg){
 void* interface(void* arg){
 
 	while(1){
+        printf("\n\n----------INSERT WAVE PARAMETERS----------\n");
 		printf("Frequency(KHz) [1-1000]: ");
 		scanf("%d", &wave_data.freq);
 		if(wave_data.freq < 1 || wave_data.freq > 1000) continue;
@@ -116,6 +130,8 @@ void* interface(void* arg){
 		    if(wave_data.transition != 0 && wave_data.transition != 1) continue;
         }
         else wave_data.transition=0;
+
+        wave_data.mtype=1;
 
 		printf("Sending data to Xenomai ...");
 		pthread_t tid;

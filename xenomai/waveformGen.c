@@ -24,12 +24,18 @@
 
 // structure for message queue 
 struct {
+    long int mtype;
 	int freq;
 	float amp;
 	char form;
 	int trigger;
 	int transition;
 } wave_data;
+
+struct {
+    long int mtype;
+	int flag;
+} wave_flag;
 
 /*
  * Task attributes 
@@ -38,10 +44,10 @@ struct {
 #define TASK_STKSZ 0 	// Default stack size
 
 #define TASK_A_PRIO 20 	// RT priority [0..99]
-#define TASK_A_PERIOD_NS 1000*1000*1000 // Task period (in ns)
+#define TASK_A_PERIOD_NS 100*1000*1000 // Task period (in ns)
 
 #define TASK_B_PRIO 20 	// priority
-#define TASK_B_PERIOD_NS 500*1000*1000 // Task period (in ns)
+#define TASK_B_PERIOD_NS 50*1000*1000 // Task period (in ns)
 
 #define TASK_LOAD_NS      10*1000*1000 // Task execution time (in ns, same to all tasks)
 
@@ -85,6 +91,17 @@ void task_read_values(void *args) {
 	char prevForm = wave_data.form;
 	int prevTrigger = wave_data.trigger;
 	int prevTransition = wave_data.transition;
+    int prefFlag = 0;
+
+    key_t key; 
+    int msgid,data; 
+  
+    // ftok to generate unique key 
+    key = ftok("progfile", 65); 
+  
+    // msgget creates a message queue 
+    // and returns identifier 
+    msgid = msgget(key, 0666 | IPC_CREAT); 
 
 	/* Get task information */
 	curtask=rt_task_self();
@@ -105,22 +122,11 @@ void task_read_values(void *args) {
 		if(to!=0) 
 			//printf("Measured period (ns)= %lu\n",(long)(ta-to));
 		to=ta;
-        
-        key_t key; 
-        int msgid; 
-      
-        // ftok to generate unique key 
-        key = ftok("progfile", 65); 
-      
-        // msgget creates a message queue 
-        // and returns identifier 
-        msgid = msgget(key, 0666 | IPC_CREAT); 
-      
+
         // msgrcv to receive message 
-        msgrcv(msgid, &wave_data, sizeof(wave_data), 0, IPC_NOWAIT); 
+        msgrcv(msgid, &wave_data, sizeof(wave_data), 1, IPC_NOWAIT); 
       
         // display the message 
-
         if(wave_data.freq!=prevFreq || wave_data.amp!=prevAmp || wave_data.form!=prevForm || wave_data.trigger!=prevTrigger || wave_data.transition!=prevTransition){
 
             printf("New input received.\n");
@@ -139,11 +145,21 @@ void task_read_values(void *args) {
 
             changed='y';
         }
-    
-        // to destroy the message queue 
-        msgctl(msgid, IPC_RMID, NULL); 
+        
+        // Receive start/stop
+        data = msgrcv(msgid, &wave_flag, sizeof(wave_flag), 2, IPC_NOWAIT);
+        if(data>0){
+            if(wave_flag.flag) 
+                printf("\nWave started being generated.\n");
+            else 
+                printf("\nWave stopped being generated.\n");
+        }
 
 	}
+
+    // to destroy the message queue 
+    msgctl(msgid, IPC_RMID, NULL); 
+
 	return;
 }
 
@@ -180,11 +196,9 @@ void task_generate_waveform(void *args) {
 			break;
 		}
 		//printf("%s activation\n", curtaskinfo.name);
-		if(to!=0) 
+		//if(to!=0) 
 			//printf("Measured period (ns)= %lu\n",(long)(ta-to));
-		to=ta;
-
-
+		//to=ta;
 
         if(changed=='y'){
 
