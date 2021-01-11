@@ -20,6 +20,47 @@ struct {
 	int transition;
 } wave_data;
 
+void* start_stop(void* arg){
+	printf("Start/Stop!");
+
+	int flag = 0;
+	char input;
+
+	key_t key; 
+    int msgid; 
+  
+    // ftok to generate unique key 
+    key = ftok("progfile", 65); 
+  
+    // msgget creates a message queue 
+    // and returns identifier 
+    msgid = msgget(key, 0666 | IPC_CREAT);
+
+	while(1){
+
+		if(flag){
+			printf("\nDo you want to stop it?");
+			scanf("%s", input);
+			flag = 0;
+			msgsnd(msgid, &flag, sizeof(flag), 0);
+
+			printf("\nNew wave?(y/n)");
+			scanf("%s", input);
+			if(input == 'n') break;
+			msgsnd(msgid, "stop", sizeof("stop"), 0);
+		}
+
+		if(!flag){
+			printf("\nDo you want to start it?");
+			scanf("%s", input);
+			flag = 1;
+			msgsnd(msgid, &flag, sizeof(flag), 0);
+		}
+	}
+
+
+}
+
 void* send_to_xenomai(void* arg){
 
 	printf(" Done!\n");
@@ -40,7 +81,14 @@ void* send_to_xenomai(void* arg){
     msgsnd(msgid, &wave_data, sizeof(wave_data), 0); 
   
     // display the message 
-    printf("Data sent.\n"); 
+    printf("Data sent.\n");
+
+	printf("Starting a Start/Stop switch...");
+	pthread_t tid;
+	pthread_create(&tid, NULL, &start_stop, NULL);
+	pthread_join(tid, NULL);
+
+
 }
 
 void* interface(void* arg){
