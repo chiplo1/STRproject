@@ -2,65 +2,76 @@
 #include <pthread.h>
 #include <string.h>
 #include <fcntl.h>
-
+#include <sys/ipc.h> 
+#include <sys/msg.h> 
 #include <sys/types.h>
 
 #include <unistd.h>
 
+#define MAX 10 
+
 #define PIPE_MINOR 0
 
-typedef struct {
+struct {
 	int freq;
 	float amp;
-	char form[16];
-	char trigger;
-	char condition;
+	char form;
+	int trigger;
+	int transition;
 } wave_data;
 
 void* send_to_xenomai(void* arg){
-    	wave_data *wd = arg;
+
 	printf(" Done!\n");
-	
-	int pipe;
 
-	char name[32];
-	char buf[16];
+    key_t key; 
+    int msgid; 
+  
+    // ftok to generate unique key 
+    key = ftok("progfile", 65); 
+  
+    // msgget creates a message queue 
+    // and returns identifier 
+    msgid = msgget(key, 0666 | IPC_CREAT); 
+    
+    printf("Sending wave: freq=%d, amp=%3f, form=%c, trigger=%d, transition=%d\n",wave_data.freq,wave_data.amp,wave_data.form,wave_data.trigger,wave_data.transition);
 
-	sprintf(name, "/dev/rtp%d", PIPE_MINOR);
-	pipe = open(name, O_RDWR);
-	if(pipe < 0) printf("Pipe creation failed!\n");
-
-	read(pipe, buf, sizeof(buf));
-	write(pipe, "Olá Guilherme", sizeof("Olá Guilherme"));
+    // msgsnd to send message 
+    msgsnd(msgid, &wave_data, sizeof(wave_data), 0); 
+  
+    // display the message 
+    printf("Data sent.\n"); 
 }
 
 void* interface(void* arg){
-	wave_data wd;
 
 	while(1){
 		printf("Frequency(KHz) [1-1000]: ");
-		scanf("%d", &wd.freq);
-		if(wd.freq < 1 || wd.freq > 1000) continue;
-wave_data wd;
+		scanf("%d", &wave_data.freq);
+		if(wave_data.freq < 1 || wave_data.freq > 1000) continue;
+
 		printf("Amplitude(V) [0.0-3.3]: ");
-		scanf("%3f", &wd.amp);
-		if(wd.amp > 3.3 || wd.amp < 0.0) continue;
+		scanf("%3f", &wave_data.amp);
+		if(wave_data.amp > 3.3 || wave_data.amp < 0.0) continue;
 
-		printf("Waveform [sin/triangle/square]: ");
-		scanf("%s", &wd.form);
-		if(strcmp(wd.form, "sin") != 0 && strcmp(wd.form, "triangle") != 0 && strcmp(wd.form, "square") != 0) continue;
+		printf("Waveform [sin(s)/triangle(t)/square(q)]: ");
+		scanf("%s", &wave_data.form);
+		if(wave_data.form != 's' && wave_data.form != 't' && wave_data.form != 'q') continue;
 
-		printf("Trigger(falling or rising edge) [0/1]: ");
-		scanf("%d", &wd.trigger);
-		if(wd.trigger != 0 && wd.trigger != 1) continue;
+		printf("Trigger condition activated [0/1]: ");
+		scanf("%d", &wave_data.trigger);
+		if(wave_data.trigger != 0 && wave_data.trigger != 1) continue;
 
-		printf("Condition [0/1]: ");
-		scanf("%d", &wd.condition);
-		if(wd.condition != 0 && wd.condition != 1) continue;
+        if(wave_data.trigger==1){
+		    printf("Trigger negative or positive edge trigger [0/1]: ");
+		    scanf("%d", &wave_data.transition);
+		    if(wave_data.transition != 0 && wave_data.transition != 1) continue;
+        }
+        else wave_data.transition=0;
 
 		printf("Sending data to Xenomai ...");
 		pthread_t tid;
-		pthread_create(&tid, NULL, &send_to_xenomai, &wd);
+		pthread_create(&tid, NULL, &send_to_xenomai, &wave_data);
 		pthread_join(tid, NULL);
 	}
 

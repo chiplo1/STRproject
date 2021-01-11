@@ -3,7 +3,8 @@
 #include <unistd.h>
 #include <signal.h>
 #include <math.h>
-#include <fcntl.h>
+#include <sys/ipc.h> 
+#include <sys/msg.h> 
 
 #include <sys/mman.h> // For mlockall
 
@@ -21,11 +22,18 @@
 	 int some_other_arg;
  };
 
+// structure for message queue 
+struct {
+	int freq;
+	float amp;
+	char form;
+	int trigger;
+	int transition;
+} wave_data;
+
 /*
  * Task attributes 
  */ 
-#define PIPE_MINOR 0
-
 #define TASK_MODE 0  	// No flags
 #define TASK_STKSZ 0 	// Default stack size
 
@@ -39,16 +47,10 @@
 
 #define SAMPLE 40
 
+#define MAX 10 
+
 RT_TASK task_a_desc; // Task decriptor
 RT_TASK task_b_desc; // Task decriptor
-
-
-// Semaphore
-
-//#define SEM_INIT 1       /* Initial semaphore count */
-//#define SEM_MODE S_FIFO  /* Wait by FIFO order */
-
-//RT_SEM sem_desc;
 
 /*
 * Catches CTRL + C to allow a controlled termination of the application
@@ -66,30 +68,8 @@ void wait_for_ctrl_c(void) {
 	printf("Terminating ...\n");
 }
 
-/*
-* Simulates the computational load of tasks
-*/ 
-void simulate_load(RTIME load_ns) {
-	RTIME ti, tf;
-	
-	ti=rt_timer_read(); // Get initial time
-	tf=ti+load_ns;      // Compute end time
-	while(rt_timer_read() < tf); // Busy wait
-
-	return;
-}
-
-float amplitude = 1; // 0 to 3.3 V resolution of 0.1 V
-unsigned long frequency = 1;   // 1 to 1k Hz resolution of 1 Hz
-char waveform = 's'; // s(sin) t(triangular) q(quadrada)
-
 char changed = 'y';
 
-int pipe_fd;
-
-/*
-* Task body implementation
-*/
 void task_read_values(void *args) {
 
 	RT_TASK *curtask;
@@ -100,6 +80,12 @@ void task_read_values(void *args) {
 	unsigned long overruns;
 	int err;
 	
+	int prevFreq = wave_data.freq;
+	float prevAmp = wave_data.amp;
+	char prevForm = wave_data.form;
+	int prevTrigger = wave_data.trigger;
+	int prevTransition = wave_data.transition;
+
 	/* Get task information */
 	curtask=rt_task_self();
 	rt_task_inquire(curtask,&curtaskinfo);
@@ -115,32 +101,48 @@ void task_read_values(void *args) {
 			printf("%s overrun!!!\n", curtaskinfo.name);
 			break;
 		}
-		printf("%s activation\n", curtaskinfo.name);
+		//printf("%s activation\n", curtaskinfo.name);
 		if(to!=0) 
-			printf("Measured period (ns)= %lu\n",(long)(ta-to));
+			//printf("Measured period (ns)= %lu\n",(long)(ta-to));
 		to=ta;
-		
-		/* Task "load" */
-		//simulate_load(TASK_LOAD_NS);
-
-        //rt_sem_p(&sem_desc,TM_INFINITE);
-    
-        amplitude = amplitude+1;
-        frequency = frequency+1;
-        waveform = 's';
-        changed='y';
-
-        char devname[32], buf[16];
-        /* ... */
-        sprintf(devname, "/dev/rtp%d", PIPE_MINOR);
-        pipe_fd = open(devname, O_RDWR);
-
-        /* Wait for the prompt string "Hello"... */
-        read(pipe_fd, buf, sizeof(buf));
-
-        //printf(buf);
         
-        //rt_sem_v(&sem_desc);
+        key_t key; 
+        int msgid; 
+      
+        // ftok to generate unique key 
+        key = ftok("progfile", 65); 
+      
+        // msgget creates a message queue 
+        // and returns identifier 
+        msgid = msgget(key, 0666 | IPC_CREAT); 
+      
+        // msgrcv to receive message 
+        msgrcv(msgid, &wave_data, sizeof(wave_data), 0, IPC_NOWAIT); 
+      
+        // display the message 
+
+        if(wave_data.freq!=prevFreq || wave_data.amp!=prevAmp || wave_data.form!=prevForm || wave_data.trigger!=prevTrigger || wave_data.transition!=prevTransition){
+
+            printf("New input received.\n");
+
+            printf("Frequency received is : %d \n",wave_data.freq); 
+            printf("Amplitude received is : %f \n",wave_data.amp);
+            printf("Waveform received is : %c \n",wave_data.form);
+            printf("Trigger received is : %d \n",wave_data.trigger);
+            printf("Transition received is : %d \n",wave_data.transition);
+          
+        	prevFreq = wave_data.freq;
+	        prevAmp = wave_data.amp;
+	        prevForm = wave_data.form;
+	        prevTrigger = wave_data.trigger;
+	        prevTransition = wave_data.transition;
+
+            changed='y';
+        }
+    
+        // to destroy the message queue 
+        msgctl(msgid, IPC_RMID, NULL); 
+
 	}
 	return;
 }
@@ -153,8 +155,13 @@ void task_generate_waveform(void *args) {
 	RTIME to=0,ta=0;
 	unsigned long overruns;
 	int err;
+  
+    int frequency = wave_data.freq;
+    float amplitude = wave_data.amp;
+    char waveform = wave_data.form;
+    int trigger = wave_data.trigger;
+    int transition = wave_data.transition;
 
-    
     float wave[SAMPLE];
 	
 	/* Get task information */
@@ -172,25 +179,30 @@ void task_generate_waveform(void *args) {
 			printf("%s overrun!!!\n", curtaskinfo.name);
 			break;
 		}
-		printf("%s activation\n", curtaskinfo.name);
+		//printf("%s activation\n", curtaskinfo.name);
 		if(to!=0) 
-			printf("Measured period (ns)= %lu\n",(long)(ta-to));
+			//printf("Measured period (ns)= %lu\n",(long)(ta-to));
 		to=ta;
-		
-		/* Task "load" */
-		//simulate_load(TASK_LOAD_NS);
 
-        //Generate waveform
-        //rt_sem_p(&sem_desc,TM_INFINITE);
 
-        printf("Amplitude %f, Frequency %lu, Waveform %c\n",amplitude,frequency,waveform);
 
         if(changed=='y'){
+
+            frequency = wave_data.freq;
+	        amplitude = wave_data.amp;
+	        waveform = wave_data.form;
+	        trigger = wave_data.trigger;
+	        transition = wave_data.transition;
+
+        }
+
+        if(changed=='y'){
+             printf("Amplitude %f, Frequency %d, Waveform %c\n",amplitude,frequency,waveform);
              switch(waveform){
                 case 's':
                     for(int i = 0; i < SAMPLE ; i++){
                         wave[i]= amplitude/2 + amplitude/2 * sin(i*(2*M_PI/SAMPLE));
-                        printf("Sin waveform: %f.\n",wave[i]);
+                        //printf("Sin waveform: %f.\n",wave[i]);
                     }
                     break;
                 case 't':
@@ -201,7 +213,7 @@ void task_generate_waveform(void *args) {
                         else{
                             wave[i]= amplitude-(i-SAMPLE/2)*amplitude/(SAMPLE/2);
                         }
-                        printf("Tri waveform: %f.\n",wave[i]);
+                        //printf("Tri waveform: %f.\n",wave[i]);
                     }
                     break;
                 case 'q':
@@ -212,17 +224,15 @@ void task_generate_waveform(void *args) {
                         else{
                             wave[i]= 0;
                         }
-                        printf("Qua waveform: %f\n",wave[i]);
+                        //printf("Qua waveform: %f\n",wave[i]);
                     }
                     break;
                 default:
                     printf("Bad waveform.\n");
                     break;
-            }     
+            }
+            changed='n';     
         }
-
-        //rt_sem_v(&sem_desc);  
-
 	}
 	return;
 }
@@ -254,8 +264,6 @@ int main(int argc, char *argv[]) {
 
 	} else 
 		printf("Task b created successfully\n");
-		
-    //err = rt_sem_create(&sem_desc,"MySemaphore",SEM_INIT,SEM_MODE);
 
 	/* Start RT task */
 	/* Args: task decriptor, address of function/implementation and argument*/
@@ -270,8 +278,6 @@ int main(int argc, char *argv[]) {
     
     rt_task_delete(&task_a_desc);
     rt_task_delete(&task_b_desc);
-
-    //rt_sem_delete(&sem_desc);
 
 	return 0;
 		
