@@ -13,6 +13,10 @@
 #include <alchemy/timer.h>
 #include <alchemy/sem.h>
 
+// UART headers
+#include <fcntl.h> // Contains file controls like O_RDWR
+#include <errno.h> // Error integer and strerror() function
+#include <termios.h> // Contains POSIX terminal control definitions
 
 /* 
  * Define task structure for setting input arguments
@@ -38,6 +42,22 @@ struct {
 } wave_flag;
 
 /*
+static const struct rtser_config my_config = {
+	.config_mask       = 0xFFFF,
+	.baud_rate         = 115200,
+	.parity            = RTSER_DEF_PARITY,
+	.data_bits         = RTSER_DEF_BITS,
+	.stop_bits         = RTSER_DEF_STOPB,
+	.handshake         = RTSER_DEF_HAND,
+	.fifo_depth        = RTSER_DEF_FIFO_DEPTH,
+	.rx_timeout        = RTSER_DEF_TIMEOUT,
+	.tx_timeout        = RTSER_DEF_TIMEOUT,
+	.event_timeout     = 1000000000, /* 1 s */
+	/*.timestamp_history = RTSER_RX_TIMESTAMP_HISTORY,
+	.event_mask        = RTSER_EVENT_RXPEND,
+};*/
+
+/*
  * Task attributes 
  */ 
 #define TASK_MODE 0  	// No flags
@@ -47,7 +67,7 @@ struct {
 #define TASK_A_PERIOD_NS 100*1000*1000 // Task period (in ns)
 
 #define TASK_B_PRIO 20 	// priority
-#define TASK_B_PERIOD_NS 50*1000*1000 // Task period (in ns)
+#define TASK_B_PERIOD_NS 200*1000*1000 // Task period (in ns)
 
 #define TASK_LOAD_NS      10*1000*1000 // Task execution time (in ns, same to all tasks)
 
@@ -72,6 +92,76 @@ void wait_for_ctrl_c(void) {
 	
 	// Will terminate
 	printf("Terminating ...\n");
+}
+
+int configSERIAL(int serial_port) {
+
+  //https://blog.mbedded.ninja/programming/operating-systems/linux/linux-serial-ports-using-c-cpp/
+
+  // Create new termios struct, we call it 'tty' for convention
+  // No need for "= {0}" at the end as we'll immediately write the existing
+  // config to this struct
+  struct termios tty;
+
+  // Read in existing settings, and handle any error
+  // NOTE: This is important! POSIX states that the struct passed to tcsetattr()
+  // must have been initialized with a call to tcgetattr() overwise behaviour
+  // is undefined
+  if(tcgetattr(serial_port, &tty) != 0) {
+      printf("Error %i from tcgetattr: %s\n", errno, strerror(errno));
+      return 1;
+  }
+
+  tty.c_cflag &= ~PARENB; // Clear parity bit, disabling parity (most common)
+  //tty.c_cflag |= PARENB;  // Set parity bit, enabling parity
+
+  tty.c_cflag &= ~CSTOPB; // Clear stop field, only one stop bit used in communication (most common)
+  //tty.c_cflag |= CSTOPB;  // Set stop field, two stop bits used in communication
+
+  tty.c_cflag &= ~CSIZE; // Clear all bits that set the data size 
+  tty.c_cflag |= CS8; // 8 bits per byte (most common)
+
+  tty.c_cflag &= ~CRTSCTS; // Disable RTS/CTS hardware flow control (most common)
+  //tty.c_cflag |= CRTSCTS;  // Enable RTS/CTS hardware flow control
+
+  tty.c_cflag |= CREAD | CLOCAL; // Turn on READ & ignore ctrl lines (CLOCAL = 1)
+
+  tty.c_lflag &= ~ICANON;
+
+  tty.c_lflag &= ~ECHO; // Disable echo
+  tty.c_lflag &= ~ECHOE; // Disable erasure
+  tty.c_lflag &= ~ECHONL; // Disable new-line echo
+
+  tty.c_lflag &= ~ISIG; // Disable interpretation of INTR, QUIT and SUSP
+
+  tty.c_iflag &= ~(IXON | IXOFF | IXANY); // Turn off s/w flow ctrl
+  tty.c_iflag &= ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL); // Disable any special handling of received bytes
+
+  tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
+  tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
+  // tty.c_oflag &= ~OXTABS; // Prevent conversion of tabs to spaces (NOT PRESENT ON LINUX)
+  // tty.c_oflag &= ~ONOEOT; // Prevent removal of C-d chars (0x004) in output (NOT PRESENT ON LINUX)
+
+  tty.c_cc[VTIME] = 10;    // Wait for up to 1s (10 deciseconds), returning as soon as any data is received.
+  tty.c_cc[VMIN] = 0;
+
+  // Set in/out baud rate to be 115200
+  cfsetispeed(&tty, B115200);
+  cfsetospeed(&tty, B115200);
+
+  // Save tty settings, also checking for error
+  if (tcsetattr(serial_port, TCSANOW, &tty) != 0) {
+      printf("Error %i from tcsetattr: %s\n", errno, strerror(errno));
+      return 1;
+  }
+}
+
+void send_rtos(char c) {
+
+    //Send wave[] to UART
+    int serial_port = open("/dev/ttyUSB0", O_RDWR);
+    configSERIAL(serial_port);
+    write(serial_port, &c, sizeof(c));
 }
 
 char changed = 'y';
@@ -171,14 +261,14 @@ void task_generate_waveform(void *args) {
 	RTIME to=0,ta=0;
 	unsigned long overruns;
 	int err;
+
+    float wave[SAMPLE];
   
     int frequency = wave_data.freq;
     float amplitude = wave_data.amp;
     char waveform = wave_data.form;
     int trigger = wave_data.trigger;
     int transition = wave_data.transition;
-
-    float wave[SAMPLE];
 	
 	/* Get task information */
 	curtask=rt_task_self();
@@ -216,7 +306,7 @@ void task_generate_waveform(void *args) {
                 case 's':
                     for(int i = 0; i < SAMPLE ; i++){
                         wave[i]= amplitude/2 + amplitude/2 * sin(i*(2*M_PI/SAMPLE));
-                        //printf("Sin waveform: %f.\n",wave[i]);
+                        printf("Sin waveform: %f.\n",wave[i]);
                     }
                     break;
                 case 't':
@@ -227,7 +317,7 @@ void task_generate_waveform(void *args) {
                         else{
                             wave[i]= amplitude-(i-SAMPLE/2)*amplitude/(SAMPLE/2);
                         }
-                        //printf("Tri waveform: %f.\n",wave[i]);
+                        printf("Tri waveform: %f.\n",wave[i]);
                     }
                     break;
                 case 'q':
@@ -238,19 +328,25 @@ void task_generate_waveform(void *args) {
                         else{
                             wave[i]= 0;
                         }
-                        //printf("Qua waveform: %f\n",wave[i]);
+                        printf("Qua waveform: %f\n",wave[i]);
                     }
                     break;
                 default:
                     printf("Bad waveform.\n");
                     break;
             }
-            changed='n';     
-        }
-	}
-	return;
-}
+            changed='n';   
 
+            char c[20] = "#mensagem a enviar$";
+
+            printf("\nSending data to UART.\n");
+            for(int i = 0;i<20;i++){
+                //send_rtos(c[i]);
+            }
+        }
+    }
+    return;
+}
 
 /*
 * Main function
@@ -296,5 +392,7 @@ int main(int argc, char *argv[]) {
 	return 0;
 		
 }
+
+
 
 
